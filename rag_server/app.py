@@ -4,7 +4,7 @@ import uuid
 from dotenv import load_dotenv
 from qe_controller import QueryEngineController
 
-from config.load_config import load_config
+from common_lib.utils.load_config import load_config
 from utils.stream_utils import stream_generator
 
 from flask_cors import CORS
