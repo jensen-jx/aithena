@@ -1,5 +1,4 @@
 from common_lib.utils.embedding_utils import get_embeddings
-from common_lib.utils.vectorstore_utils import get_vectorstore
 from common_lib.utils.llm_utils import get_llm
 from dotenv import load_dotenv
 
@@ -10,10 +9,12 @@ from llama_index.core.retrievers import BaseRetriever, QueryFusionRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 
 from llama_index.core.indices.document_summary import DocumentSummaryIndex, DocumentSummaryIndexEmbeddingRetriever
-from llama_index.core.postprocessor.sbert_rerank import SentenceTransformerRerank
+from llama_index.core.postprocessor import SentenceTransformerRerank
 
 from llama_index.storage.docstore.mongodb import MongoDocumentStore
 from llama_index.storage.index_store.mongodb import MongoIndexStore
+
+from llama_index.vector_stores.milvus import MilvusVectorStore
 
 from typing import Dict, List, Any
 
@@ -28,8 +29,8 @@ class QueryEngineController:
         self.config = config
         db_dir = config['db_dir']
         self.extraction_types = ["cases", "case_summaries"]
-        self.db_dirs = {name: os.path.join(db_dir, name) for name in self.extraction_types}  
         self.mongo_uri = os.getenv('MONGO_URI')
+        self.milvus_uri = os.getenv('MILVUS_URI')
         self.embeddings = get_embeddings(**config['embeddings'])
         vectorstore_config = config['vectorstore']
         self.vector_stores = {}
@@ -50,10 +51,8 @@ class QueryEngineController:
             namespace = name
             vectorstore = None
             storagecontext = None
-            try:
-                vectorstore = get_vectorstore(db_dir = self.db_dirs[name], **vectorstore_config[name])
-            except:
-                vectorstore = get_vectorstore(**vectorstore_config[name])
+
+            vectorstore = MilvusVectorStore(uri=self.milvus_uri, **vectorstore_config[name])         
             
             docstore = MongoDocumentStore.from_uri(self.mongo_uri, db_name="docstore", namespace=namespace)
             index_store = MongoIndexStore.from_uri(self.mongo_uri, db_name="indexstore", namespace=namespace)
@@ -86,7 +85,7 @@ class QueryEngineController:
         path = self.config['postprocessors']['rerank'].pop("path")
         self.config['postprocessors']['rerank']['model'] = os.path.join(path, self.config['postprocessors']['rerank']['model'])
         rerank = SentenceTransformerRerank(**self.config['postprocessors']['rerank'])
-        self.node_processors = []
+        self.node_processors = [rerank]
 
     def get_query_engine(self) -> BaseQueryEngine:
         logger.info("Get query engine")

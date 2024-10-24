@@ -1,10 +1,10 @@
 from common_lib.utils.loader import load_pdf, load_pdf_API
 from common_lib.utils.embedding_utils import get_embeddings, get_langchain_embeddings
-from common_lib.utils.vectorstore_utils import get_vectorstore
 from common_lib.utils.llm_utils import get_llm
 from common_lib.utils.async_utils import async_run
 from common_lib.utils.load_config import load_config
 from common_lib.custom_models.custom_document_summary import CustomDocumentSummaryIndex
+from common_lib.custom_models.custom_milvus_vectorstore import CustomMilvusVectorStore
 
 from typing import List, Dict
 from langchain_experimental.text_splitter import SemanticChunker
@@ -14,6 +14,7 @@ from llama_index.core.ingestion import run_transformations
 from llama_index.core.settings import Settings
 from llama_index.storage.docstore.mongodb import MongoDocumentStore
 from llama_index.storage.index_store.mongodb import MongoIndexStore
+from llama_index.vector_stores.milvus import MilvusVectorStore
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -29,9 +30,9 @@ class IngestionSvc:
         self.semantic_chunker = SemanticChunker(embeddings=get_langchain_embeddings(**embedding_config))
 
         self.extraction_types = ["cases", "case_summaries"]
-        self.db_dirs = {name: os.path.join(db_dir, name) for name in self.extraction_types}  
 
         self.mongo_uri = os.getenv('MONGO_URI')
+        self.milvus_uri = os.getenv('MILVUS_URI')
 
         self.ingested_db = AsyncIOMotorClient(self.mongo_uri).ingested_db.ingested
 
@@ -52,11 +53,8 @@ class IngestionSvc:
             namespace = name
             vectorstore = None
             storagecontext = None
-            try:
-                vectorstore = get_vectorstore(db_dir = self.db_dirs[name], **vectorstore_config[name])
-            except:
-                vectorstore = get_vectorstore(**vectorstore_config[name])
-            
+             
+            vectorstore = CustomMilvusVectorStore(uri=self.milvus_uri, **vectorstore_config[name])            
             docstore = MongoDocumentStore.from_uri(self.mongo_uri, db_name="docstore", namespace=namespace)
             index_store = MongoIndexStore.from_uri(self.mongo_uri, db_name="indexstore", namespace=namespace)
             storagecontext = StorageContext.from_defaults(vector_store=vectorstore, docstore=docstore, index_store=index_store)
@@ -101,9 +99,6 @@ class IngestionSvc:
         return metadata
 
     async def add_document_to_indices(self, path: str) -> None:
-
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.process_pdf, path)
         documents  = self.process_pdf(path)
         for name in self.extraction_types:
             print(f"Creating Index for {name}")
@@ -127,7 +122,6 @@ class IngestionSvc:
                 await index._async_add_nodes_to_index(nodes=nodes, index_struct=index_struct)
 
                 index.storage_context.index_store.add_index_struct(index_struct)
-                index.storage_context.persist(self.db_dirs[name])
         
         record = {"file": Path(path).name, "success": True}
         await self.ingested_db.insert_one(record)
@@ -142,8 +136,5 @@ class IngestionSvc:
             elif await self.ingested_db.find_one({"file": Path(path).name}) is not None: 
                 print(f"{path} has been ingested before. This file will be ignored.")
                 continue
-            tasks.append(self.add_document_to_indices(path))
-    
-
-        documents = await async_run(tasks, 5)
- 
+            await self.add_document_to_indices(path)
+     

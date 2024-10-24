@@ -19,7 +19,10 @@ from llama_index.core.utils import get_tqdm_iterable
 from common_lib.utils.async_utils import async_run
 
 logger = logging.getLogger(__name__)
-
+'''
+Custom Class
+1. Add async function
+'''
 class CustomDocumentSummaryIndex(DocumentSummaryIndex):
 
     async def _async_add_nodes_to_index(
