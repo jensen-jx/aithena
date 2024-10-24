@@ -6,6 +6,8 @@ from common_lib.utils.load_config import load_config
 from common_lib.custom_models.custom_document_summary import CustomDocumentSummaryIndex
 from common_lib.custom_models.custom_milvus_vectorstore import CustomMilvusVectorStore
 
+from ingestion.utils.extract_roles import async_extract_roles
+
 from typing import List, Dict
 from langchain_experimental.text_splitter import SemanticChunker
 from llama_index.core.indices.vector_store import VectorStoreIndex
@@ -19,8 +21,7 @@ from llama_index.vector_stores.milvus import MilvusVectorStore
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 import os
-import itertools
-import asyncio
+ 
 from pathlib import Path
 class IngestionSvc:
     def __init__(self, db_dir:str, llm_config: Dict[str, str], vectorstore_config: Dict[str, str], embedding_config: Dict[str, str]):
@@ -77,7 +78,7 @@ class IngestionSvc:
       
          
 
-    def process_pdf(self, file_path: str) -> List[Document]:
+    async def process_pdf(self, file_path: str) -> List[Document]:
         
         file_name = Path(file_path).name
         print(f"Processing: {file_name}")
@@ -89,7 +90,9 @@ class IngestionSvc:
         documents = []
         metadata = self.get_metadata(file_path, file_name)
 
-        for chunk in chunks:
+        rhetorical_roles = await async_extract_roles(chunks, self.llm)
+        for chunk, role in zip(chunks, rhetorical_roles):
+            metadata['role'] = role
             doc = Document(text=chunk, metadata=metadata)
             documents.append(doc)
         return documents
@@ -99,7 +102,7 @@ class IngestionSvc:
         return metadata
 
     async def add_document_to_indices(self, path: str) -> None:
-        documents  = self.process_pdf(path)
+        documents  = await self.process_pdf(path)
         for name in self.extraction_types:
             print(f"Creating Index for {name}")
             index = self.indices[name]
